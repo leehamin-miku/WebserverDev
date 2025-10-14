@@ -27,7 +27,7 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
         case LWS_CALLBACK_RECEIVE: {
             // 메시지 수신 시
             char *received_data = (char *)in;
-            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Received raw data: \n--%s--\nsize:%f\n", received_data, len); // 여기서 헤더의 정보가 함께 들어옴
+            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Received raw data: \n--%s--\nsize:%d\n", received_data, len); // 여기서 헤더의 정보가 함께 들어옴
             
             // X-M2M-Origin 헤더 추출
             char *origin = find_x_m2m_origin(received_data);
