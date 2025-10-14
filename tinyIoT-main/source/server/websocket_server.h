@@ -46,7 +46,7 @@ typedef struct {
 void *coap_serve();
 void coap_notify(oneM2MPrimitive *o2pt, char *noti_json, NotiTarget *nt);
 void coap_forwarding(oneM2MPrimitive *o2pt, Protocol protocol, char *host, int port);
-
+void response_retrieve(oneM2MPrimitive* o2pt, cJSON* resource_obj, const char* resource_key);
 extern void route(oneM2MPrimitive *o2pt);
 
 #ifdef ENABLE_COAP_DTLS
