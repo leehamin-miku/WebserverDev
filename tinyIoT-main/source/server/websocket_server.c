@@ -220,54 +220,84 @@ static struct lws_protocols protocols[] = {
     {NULL, NULL, 0, 0} /* end */
 };
 
+//void initialize_websocket_server() {
+//    struct lws_context_creation_info info;
+//    memset(&info, 0, sizeof info);
+//    info.port = 8081;
+//    info.protocols = protocols;
+//    info.gid = -1;
+//    info.uid = -1;
+//
+//    lws_set_log_level(LLL_ERR, NULL);
+//
+//    struct lws_context *context_ws = lws_create_context(&info);
+//    if (context_ws == NULL) {
+//        logger("WEBSOCKET", LOG_LEVEL_ERROR, "WebSocket(ws) context creation failed");
+//        return;
+//    }
+//
+//    logger("WEBSOCKET", LOG_LEVEL_INFO, "WebSocket Server(ws) started on port 8081");
+//
+//    //wss 설정
+//    struct lws_context_creation_info info_wss;
+//    memset(&info_wss, 0, sizeof(info_wss));
+//    info_wss.port = 8443;
+//    info_wss.protocols = protocols;
+//    info_wss.gid = -1;
+//    info_wss.uid = -1;
+//
+//    // SSL/TLS 설정 추가
+//    info_wss.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT; 
+//    info_wss.ssl_cert_filepath = "/root/tinyIoT/source/server/cert.pem"; 
+//    info_wss.ssl_private_key_filepath = "/root/tinyIoT/source/server/key.pem"; 
+//
+//    struct lws_context *context_wss = lws_create_context(&info_wss);
+//    if (context_wss == NULL) {
+//        logger("WEBSOCKET", LOG_LEVEL_ERROR, "WebSocket (wss) context creation failed");
+//        return;
+//    }
+//
+//    logger("WEBSOCKET", LOG_LEVEL_INFO, "WebSocket Server (wss) started on port 8443");
+//    
+//
+//    while (1) {
+//        lws_service(context_ws, 1000); //ws
+//        lws_service(context_wss, 1000); // wss
+//    }
+//
+//    lws_context_destroy(context_ws);
+//    lws_context_destroy(context_wss);
+//}
+
 void initialize_websocket_server() {
     struct lws_context_creation_info info;
-    memset(&info, 0, sizeof info);
-    info.port = 8081;
-    info.protocols = protocols;
+    memset(&info, 0, sizeof(info));
+    info.port = 8081;          // 일반 WS 포트
+    info.protocols = protocols; // 미리 정의된 프로토콜 배열
     info.gid = -1;
     info.uid = -1;
 
     lws_set_log_level(LLL_ERR, NULL);
 
-    struct lws_context *context_ws = lws_create_context(&info);
+    // WS context 생성
+    struct lws_context* context_ws = lws_create_context(&info);
     if (context_ws == NULL) {
-        logger("WEBSOCKET", LOG_LEVEL_ERROR, "WebSocket(ws) context creation failed");
+        logger("WEBSOCKET", LOG_LEVEL_ERROR, "WebSocket context creation failed");
         return;
     }
 
-    logger("WEBSOCKET", LOG_LEVEL_INFO, "WebSocket Server(ws) started on port 8081");
+    logger("WEBSOCKET", LOG_LEVEL_INFO, "WebSocket Server started on port 8081");
 
-    //wss 설정
-    struct lws_context_creation_info info_wss;
-    memset(&info_wss, 0, sizeof(info_wss));
-    info_wss.port = 8443;
-    info_wss.protocols = protocols;
-    info_wss.gid = -1;
-    info_wss.uid = -1;
-
-    // SSL/TLS 설정 추가
-    info_wss.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT; 
-    info_wss.ssl_cert_filepath = "/root/tinyIoT/source/server/cert.pem"; 
-    info_wss.ssl_private_key_filepath = "/root/tinyIoT/source/server/key.pem"; 
-
-    struct lws_context *context_wss = lws_create_context(&info_wss);
-    if (context_wss == NULL) {
-        logger("WEBSOCKET", LOG_LEVEL_ERROR, "WebSocket (wss) context creation failed");
-        return;
-    }
-
-    logger("WEBSOCKET", LOG_LEVEL_INFO, "WebSocket Server (wss) started on port 8443");
-    
+    // 테스트용으로 WSS/SSL 관련 코드는 제거
 
     while (1) {
-        lws_service(context_ws, 1000); //ws
-        lws_service(context_wss, 1000); // wss
+        lws_service(context_ws, 1000); // WS만 서비스
     }
 
+    // 서버 종료 시 context destroy
     lws_context_destroy(context_ws);
-    lws_context_destroy(context_wss);
 }
+
 
 void send_websocket_message(struct lws *wsi, const char *message) {
     size_t message_length = strlen(message);
