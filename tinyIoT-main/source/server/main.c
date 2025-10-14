@@ -49,6 +49,9 @@ pthread_t mqtt;
 int mqtt_thread_id;
 #endif
 
+pthread_t websocket_thread;
+int websocket_thread_id;
+
 #ifdef ENABLE_COAP
 pthread_t coap;
 int coap_thread_id;
@@ -77,6 +80,11 @@ static ssize_t cmdline_read_key(char *arg, unsigned char **buf, size_t maxlen)
 }
 #endif
 #endif
+
+void *websocket_server_thread(void *arg) {
+    initialize_websocket_server();
+    return NULL;
+}
 
 int main(int argc, char **argv)
 {
@@ -206,6 +214,13 @@ int main(int argc, char **argv)
 		return 0;
 	}
 #endif
+	if (pthread_create(&websocket_thread, NULL, websocket_server_thread, NULL) != 0) {
+    	perror("Failed to create WebSocket server thread");
+    	return 1;
+	}
+
+// 스레드가 종료될 때까지 대기
+	pthread_join(websocket_thread, NULL);
 
 	serve_forever(PORT); // main oneM2M operation logic in void route()
 
