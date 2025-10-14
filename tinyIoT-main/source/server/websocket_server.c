@@ -275,8 +275,7 @@ void initialize_websocket_server() {
     memset(&info, 0, sizeof(info));
     info.port = 8081;          // 일반 WS 포트
     info.protocols = protocols; // 미리 정의된 프로토콜 배열
-    info.options = LWS_SERVER_OPTION_DISABLE_IPV6 |
-        LWS_SERVER_OPTION_SKIP_SERVER_PERMESSAGE_DEFLATE;
+    info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
     info.gid = -1;
     info.uid = -1;
 
