@@ -55,11 +55,14 @@ RELEXE = server
 
 all: $(RELEXE)
 
-$(RELEXE) : $(OBJS)
-	$(CC) $(RELCFLAGS) -o $(RELEXE) $(OBJS) $(LIBS)
 
+# 빌드 타겟
+$(RELEXE) : $(OBJS)
+	$(CC) $(RELCFLAGS) $(CFLAGS) -o $(RELEXE) $(OBJS) $(LIBS) $(LDFLAGS)
+
+# 오브젝트 파일 컴파일
 %.o: %.c
-	$(CC) $(RELCFLAGS) -c $< -o $@
+	$(CC) $(RELCFLAGS) $(CFLAGS) -c $< -o $@
 
 conf: semi-clean all
 
