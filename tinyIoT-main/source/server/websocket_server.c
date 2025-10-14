@@ -313,6 +313,7 @@ void response_create(oneM2MPrimitive *o2pt, cJSON *resource_obj, const char *res
     
     cJSON *response = cJSON_CreateObject();
     cJSON_AddNumberToObject(response, "rsc", o2pt->rsc);  // 응답 상태 코드
+    
     cJSON_AddStringToObject(response, "rqi", o2pt->rqi);  // 요청 ID
     cJSON_AddStringToObject(response, "rvi", from_rvi(o2pt->rvi));  // 버전
 
@@ -363,7 +364,10 @@ int response_delete(oneM2MPrimitive *o2pt) {
     cJSON_AddNumberToObject(response, "rsc", o2pt->rsc);  // 응답 상태 코드
     cJSON_AddStringToObject(response, "rqi", o2pt->rqi);  // 요청 ID
     cJSON_AddStringToObject(response, "rvi", from_rvi(o2pt->rvi));  // 버전
-    cJSON_AddStringToObject(response, "pc", o2pt->request_pc);  // 요청 ID
+
+    cJSON_AddStringToObject(response, "pc", cJSON_GetStringValue(o2pt->request_pc));
+
+    //cJSON_AddStringToObject(response, "pc", o2pt->request_pc);  // 요청 ID
 
     o2pt->response_pc = response;
     //logger("WEBSOCKET", LOG_LEVEL_DEBUG, "delete 응답 메세지 : %s", cJSON_PrintUnformatted(response));
