@@ -46,6 +46,11 @@ LSRCS = wolfmqtt/mqtt_client.c wolfmqtt/mqtt_packet.c wolfmqtt/mqtt_socket.c $(D
 
 OBJS = $(SRCS:.c=.o) $(RSCSRC:.c=.o) $(LSRCS:.c=.o) $(LIBCOAP:.c=.o)
 
+#LWS추가
+LDFLAGS += $(shell pkg-config --libs libwebsockets)
+CFLAGS += $(shell pkg-config --cflags libwebsockets)
+
+
 RELEXE = server
 
 all: $(RELEXE)
