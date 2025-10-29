@@ -15,14 +15,106 @@ void response_update(oneM2MPrimitive *o2pt, cJSON *resource_obj, const char *res
 void route(oneM2MPrimitive *o2pt);
 char *find_x_m2m_origin(const char *data);
 
+
+#define MAX_CLIENTS 64
+
+static struct lws* clients[MAX_CLIENTS];
+static int client_count = 0;
+
+//전방 클라이언트들에게 json 발사!!
+static void broadcast_message(const char* msg)
+{
+    for (int i = 0; i < client_count; i++) {
+        if (clients[i]) {
+            size_t len = strlen(msg);
+            unsigned char buf[LWS_PRE + 1024];
+            unsigned char* p = &buf[LWS_PRE];
+            memcpy(p, msg, len);
+            lws_write(clients[i], p, len, LWS_WRITE_TEXT);
+        }
+    }
+}
+
+static char* get_latest_content_instance(const char* path)
+{
+    // TODO: 실제 oneM2M에서 cin 값 가져오기
+    oneM2MPrimitive* o2pt = (oneM2MPrimitive*)calloc(1, sizeof(oneM2MPrimitive));
+    o2pt->to = strdup(path);
+    o2pt->ty = 4;
+    o2pt->rvi = 3;
+    o2pt->rqi = strdup("req12347");
+    o2pt->op = 2;
+    o2pt->rcn = RCN_ATTRIBUTES_AND_CHILD_RESOURCES;
+    o2pt->fr = strdup("CAdmin");
+    route(o2pt);
+    cJSON* response = o2pt_to_json(o2pt);
+    
+    
+    char* st_internal = cJSON_GetObjectItem(
+        cJSON_GetObjectItem(
+            cJSON_GetObjectItem(response, "pc"), "m2m:cin"),
+        "con")->valuestring;
+
+    char* st = strdup(st_internal); // strdup로 복사
+    free(response);
+    free_o2pt(o2pt);                // o2pt 메모리 해제
+    return st;
+}
+
+// JSON 조합
+static char* make_sensor_status_json()
+{
+    const char* paths[] = {
+        "TinyIoT/TinyFarm/Sensors/Temperature/la",
+        "TinyIoT/TinyFarm/Sensors/CO2/la"
+    };
+
+    /*"TinyIot/TinyFarm/Actuator/LED/la"*/
+    const char* keys[] = { "Temperature", "CO2"};
+    int count = sizeof(paths) / sizeof(paths[0]);
+
+    cJSON* root = cJSON_CreateObject();
+
+    for (int i = 0; i < count; i++) {
+        char* value = get_latest_content_instance(paths[i]);
+        cJSON_AddStringToObject(root, keys[i], value);
+        free(value);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root); // 메모리 할당됨
+    cJSON_Delete(root);
+    return json_str; // 호출 후 free() 필요
+}
+
+
+static void PullingRoutine() {
+    char* s = make_sensor_status_json();
+    broadcast_message(s);
+    free(s);
+}
+
+
 static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
                               void *user, void *in, size_t len) {
 
     switch (reason) {
         case LWS_CALLBACK_ESTABLISHED: {
             logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Connection established"); // 웹소켓 연결 수립
+            clients[client_count++] = wsi;
+            //PullingRoutine();
             break;
         }
+        case LWS_CALLBACK_CLOSED:
+            logger("WEBSOCKET", LOG_LEVEL_INFO, "Connection closed");
+            break;
+            for (int i = 0; i < client_count; i++) {
+                if (clients[i] == wsi) {
+                    clients[i] = clients[--client_count];
+                    clients[client_count] = NULL;
+                    printf("Client disconnected. Total: %d\n", client_count);
+                    break;
+                }
+            }
 
         case LWS_CALLBACK_RECEIVE: {
             // 메시지 수신 시
@@ -41,7 +133,7 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
             cJSON *json = cJSON_Parse(received_data);
             if (json == NULL) { 
                 logger("WEBSOCKET", LOG_LEVEL_ERROR, "Invalid JSON format");
-                return -1;
+                return -1; //json 아닌 입력 차단
             }
 
             // // JSON 구조체를 문자열로 변환하여 출력 -> 여기서 헤더 사라짐
@@ -62,15 +154,17 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
             cJSON *rqi = cJSON_GetObjectItem(json, "rqi");
             cJSON *fr = cJSON_GetObjectItem(json, "fr");
             cJSON *ty = cJSON_GetObjectItem(json, "ty");
-            cJSON *pc = cJSON_GetObjectItem(json, "pc");
+            
             cJSON *rvi = cJSON_GetObjectItem(json, "rvi");
 
+            cJSON* pc = cJSON_GetObjectItem(json, "pc"); //html에서 body에 해당하는 부분
+            // Payload json 파싱
+            if (!cJSON_IsObject(pc) && (op->valueint == 1 || op->valueint == 3 || op->valueint == 5)) {
+                logger("WEBSOCKET", LOG_LEVEL_ERROR, "Invalid pc format, pc is not json.");
+            }
 
-            // Payload 먼저 처리    
-            if (cJSON_IsObject(pc)) {
-                o2pt->request_pc = cJSON_Duplicate(pc, 1);
-                logger("WEBSOCKET", LOG_LEVEL_DEBUG, "pc: %s", cJSON_Print(o2pt->request_pc));
-            } 
+            o2pt->request_pc = cJSON_Duplicate(pc, 1);
+            /*logger("WEBSOCKET", LOG_LEVEL_DEBUG, "pc: %s", cJSON_Print(o2pt->request_pc));*/
 
 
             // fr 필드가 없으면 WebSocket 헤더에서 가져온 X-M2M-Origin 값을 사용
@@ -78,8 +172,15 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
                 o2pt->fr = strdup(fr->valuestring);
                 logger("WEBSOCKET", LOG_LEVEL_DEBUG, "fr 필드가 있을때 X-M2M-Origin : %s", o2pt->fr);
             } else {
-                o2pt->fr = strdup(origin);
-                logger("WEBSOCKET", LOG_LEVEL_DEBUG, "fr 필드가 없을때 X-M2M-Origin : %s ", o2pt->fr);
+                if (origin) {
+                    o2pt->fr = strdup(origin);
+                    logger("WEBSOCKET", LOG_LEVEL_DEBUG, "fr 필드가 없을때 X-M2M-Origin : %s ", o2pt->fr);
+                }
+                else {
+                    logger("WEBSOCKET", LOG_LEVEL_WARN, "fr 필드도 origin도 없음");
+                    return -1;
+                }
+                
             }
 
             // 나머지 필드들 처리
@@ -88,16 +189,44 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
 
         
             // 요청 유형에 따라 rcn 필드 설정
+            //switch (o2pt->op) {
+            //    case 1: // create
+            //    case 2: // retrieve
+            //    case 3: // update
+            //        o2pt->rcn = RCN_ATTRIBUTES;
+            //        break;
+            //    case 4: // delete
+            //        o2pt->rcn = RCN_NOTHING;
+            //        break;
+            //}
+
             switch (o2pt->op) {
-                case 1: // create
-                case 2: // retrieve
-                case 3: // update
-                    o2pt->rcn = RCN_ATTRIBUTES;
+                case OP_CREATE:   // 1
+                    // 클라이언트가 rcn을 지정했으면 그대로 사용, 없으면 기본값 적용
+                    o2pt->rcn = RCN_ATTRIBUTES; // 기본값: 생성 후 리소스 속성만 반환
                     break;
-                case 4: // delete
-                    o2pt->rcn = RCN_NOTHING;
+
+                case OP_RETRIEVE: // 2
+                    o2pt->rcn = RCN_ATTRIBUTES_AND_CHILD_RESOURCES;
+                    break;
+
+                case OP_UPDATE:   // 3
+                    o2pt->rcn = RCN_ATTRIBUTES; // 기본값: 수정된 속성만 반환
+                    break;
+
+                case OP_DELETE:   // 4
+                    o2pt->rcn = RCN_NOTHING; // 삭제 시 반환할 내용 없음
+                    break;
+
+                case OP_DISCOVERY: // 5
+                    o2pt->rcn = RCN_DISCOVERY_RESULT_REFERENCES;
+                    break;
+
+                default:
+                    handle_error(o2pt, RSC_BAD_REQUEST, "Unsupported operation");
                     break;
             }
+
 
             // to 필드 처리
             if (to) {
@@ -123,43 +252,75 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
             // if (pc) o2pt->pc = cJSON_Duplicate(pc, 1);
 
             // 요청 로깅
-            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Parsed request: op=%d, to=%s, rqi=%s, ty=%d, rvi=%d",
+            /*logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Parsed request: op=%d, to=%s, rqi=%s, ty=%d, rvi=%d",
                     o2pt->op, o2pt->to, o2pt->rqi, o2pt->ty, o2pt->rvi);
-            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Parsed content: %s", cJSON_Print(o2pt->request_pc));
+            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Parsed content: %s", cJSON_Print(o2pt->request_pc));*/
 
             // 요청 라우팅
-            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "route 시작전");
+            logger("WEBSOCKET", LOG_LEVEL_DEBUG, "route 시작전 ty : = %d", o2pt->ty);
+
             route(o2pt);
+            
             cJSON * response = o2pt_to_json(o2pt);
             
             logger("WEBSOCKET", LOG_LEVEL_DEBUG, "rsc : %d", o2pt->rsc);
             // 응답 생성
             if (o2pt->rsc == 2001) {  // 생성 요청
                 const char *resource_key = get_resource_key(o2pt->ty);
+
+                //신 생성 요청
                 if (resource_key) {
-                    cJSON *resource = cJSON_GetObjectItem(o2pt->request_pc, resource_key);
-                    const char *rn = cJSON_GetObjectItem(resource, "rn")->valuestring;
-                    logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Resource name: %s", rn);
-                    
-                    char created_ri[256];
-                    snprintf(created_ri, sizeof(created_ri), "%s/%s", o2pt->to, rn);
-                    logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Created resource path: %s", created_ri);
-                    RTNode *created_node = find_rtnode(created_ri);
-                    if (created_node && created_node->obj) {
+                    cJSON* resource = cJSON_GetObjectItem(o2pt->request_pc, resource_key);
+                    //        const char* rn = cJSON_GetObjectItem(resource, "rn")->valuestring;
+                    //        logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Resource name: %s", rn);
+
+                    //        char created_ri[256];
+                    //        snprintf(created_ri, sizeof(created_ri), "%s/%s", o2pt->to, rn);
+                    //        logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Created resource path: %s", created_ri);
+                    //        RTNode* created_node = find_rtnode(created_ri);
+
+
+                    RTNode* parent_node = find_rtnode(o2pt->to);
+                    create_onem2m_resource(o2pt, parent_node);
+                    response_create(o2pt, parent_node->obj, resource_key);
+                    /*if (created_node && created_node->obj) {
                         response_create(o2pt, created_node->obj, resource_key);
-                    } else {
-                        logger("WEBSOCKET", LOG_LEVEL_ERROR, "Created node or resource key not found");
                     }
+                    else {
+                        logger("WEBSOCKET", LOG_LEVEL_ERROR, "Created node or resource key not found");
+                    }*/
                 }
+                //else if (ty == 3) { //cnt 생성 요청
+
+                //    if (resource_key) {
+                //        cJSON* resource = cJSON_GetObjectItem(o2pt->request_pc, resource_key);
+                //        const char* rn = cJSON_GetObjectItem(resource, "rn")->valuestring;
+                //        logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Resource name: %s", rn);
+
+                //        char created_ri[256];
+                //        snprintf(created_ri, sizeof(created_ri), "%s/%s", o2pt->to, rn);
+                //        logger("WEBSOCKET", LOG_LEVEL_DEBUG, "Created resource path: %s", created_ri);
+                //        RTNode* created_node = find_rtnode(created_ri);
+                //        if (created_node && created_node->obj) {
+                //            response_create(o2pt, created_node->obj, resource_key);
+                //        }
+                //        else {
+                //            logger("WEBSOCKET", LOG_LEVEL_ERROR, "Created node or resource key not found");
+                //        }
+                //    }
+                //}
+
+
+                
             } 
 
             else if (o2pt->rsc == 2000) {  // 조회 요청
                 const char *resource_key = get_resource_key(o2pt->ty);
                 if (resource_key) {
-                RTNode *retrieved_node = find_rtnode(o2pt->to);
-                if (retrieved_node && retrieved_node->obj) {
-                    response_retrieve(o2pt, retrieved_node->obj, resource_key);
-                } else {
+                    RTNode *retrieved_node = find_rtnode(o2pt->to);
+                    if (retrieved_node && retrieved_node->obj) {
+                        response_retrieve(o2pt, retrieved_node->obj, resource_key);
+                    } else {
                      logger("WEBSOCKET", LOG_LEVEL_ERROR, "Retrieved node or resource key not found");
                     }
                 }
@@ -200,10 +361,6 @@ static int callback_websocket(struct lws *wsi, enum lws_callback_reasons reason,
             free_o2pt(o2pt);  // 프리미티브 메모리 해제
             break;
         }
-
-        case LWS_CALLBACK_CLOSED:
-            logger("WEBSOCKET", LOG_LEVEL_INFO, "Connection closed");
-            break;
 
         default:
             break;
@@ -414,5 +571,5 @@ char *find_x_m2m_origin(const char *data) { // 요청헤더에서 X-M2M-Origin �
             return origin; // 오리진 반환
         }
     }
-    return strdup(""); // 못 찾았을 경우 빈값을 반환하도록 설정
+    return NULL; // 못 찾았을 경우 널값을 반환하도록 설정
 }
